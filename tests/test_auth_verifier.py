@@ -1,9 +1,11 @@
-"""Unit tests for DbTokenVerifier and UsersDb lookups."""
+"""Unit tests for registry API-key and OIDC authentication."""
 
 import asyncio
 import hashlib
 
-from odoo_mcp.auth_verifier import ENV_ADMIN_CLIENT_ID, DbTokenVerifier
+from fastmcp.server.auth.providers.jwt import RSAKeyPair
+
+from odoo_mcp.auth_verifier import ENV_ADMIN_CLIENT_ID, DbTokenVerifier, RegistryMappedJWTVerifier
 from odoo_mcp.users_db import UsersDb
 
 
@@ -96,3 +98,80 @@ def test_get_odoo_credentials(users_db_seed):
     assert creds is not None
     assert creds.odoo_username == "thierry@cyanview.com"
     assert db.get_odoo_credentials(users_db_seed.user_ids["admin"]) is None
+
+
+def test_lookup_active_user_by_email_is_case_insensitive(users_db_seed):
+    db = UsersDb(users_db_seed.db_path)
+    identity = db.lookup_active_user_by_email("MEMBER@CYANVIEW.COM")
+    assert identity is not None
+    assert identity.user_id == users_db_seed.user_ids["member"]
+    assert identity.role == "support"
+
+
+def test_lookup_active_user_by_email_rejects_inactive(users_db_seed):
+    db = UsersDb(users_db_seed.db_path)
+    assert db.lookup_active_user_by_email("inactive@cyanview.com") is None
+
+
+def _oidc_verifier(users_db_seed, keypair: RSAKeyPair, *, audience="kasbifydev-mcp"):
+    return RegistryMappedJWTVerifier(
+        users_db=UsersDb(users_db_seed.db_path),
+        public_key=keypair.public_key,
+        issuer="https://auth.example.test/realms/engineering",
+        audience=audience,
+        algorithm="RS256",
+    )
+
+
+def test_oidc_token_maps_email_to_registry_user(users_db_seed):
+    keypair = RSAKeyPair.generate()
+    raw = keypair.create_token(
+        subject="keycloak-subject-123",
+        issuer="https://auth.example.test/realms/engineering",
+        audience="kasbifydev-mcp",
+        scopes=["openid", "profile", "email"],
+        additional_claims={"email": "member@cyanview.com", "azp": "chatgpt-dynamic-client"},
+    )
+    token = _verify(_oidc_verifier(users_db_seed, keypair), raw)
+    assert token is not None
+    assert token.client_id == users_db_seed.user_ids["member"]
+    assert token.claims["auth"] == "oidc"
+    assert token.claims["oidc_subject"] == "keycloak-subject-123"
+    assert token.claims["oidc_client_id"] == "chatgpt-dynamic-client"
+    assert token.claims["role"] == "support"
+    assert "read" in token.scopes
+    assert "write" in token.scopes
+    assert "openid" in token.scopes
+
+
+def test_oidc_readonly_registry_role_cannot_write(users_db_seed):
+    keypair = RSAKeyPair.generate()
+    raw = keypair.create_token(
+        issuer="https://auth.example.test/realms/engineering",
+        audience="kasbifydev-mcp",
+        additional_claims={"email": "readonly@cyanview.com"},
+    )
+    token = _verify(_oidc_verifier(users_db_seed, keypair), raw)
+    assert token is not None
+    assert "read" in token.scopes
+    assert "write" not in token.scopes
+
+
+def test_oidc_unknown_registry_email_rejected(users_db_seed):
+    keypair = RSAKeyPair.generate()
+    raw = keypair.create_token(
+        issuer="https://auth.example.test/realms/engineering",
+        audience="kasbifydev-mcp",
+        additional_claims={"email": "nobody@example.test"},
+    )
+    assert _verify(_oidc_verifier(users_db_seed, keypair), raw) is None
+
+
+def test_oidc_wrong_audience_rejected_before_registry_mapping(users_db_seed):
+    keypair = RSAKeyPair.generate()
+    raw = keypair.create_token(
+        issuer="https://auth.example.test/realms/engineering",
+        audience="some-other-api",
+        additional_claims={"email": "member@cyanview.com"},
+    )
+    assert _verify(_oidc_verifier(users_db_seed, keypair), raw) is None
