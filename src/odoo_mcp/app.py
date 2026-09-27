@@ -77,24 +77,108 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 # ----- Authentication -----
 
 
-def _get_auth_provider():
-    """Get the auth provider.
+def _csv_env(name: str, default: str = "") -> list[str]:
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
 
-    USERS_DB_PATH set -> per-user keys from the shared registry, with the
-    static MCP_API_KEY (if any) kept as fallback. Otherwise today's
-    single-static-key behavior, or no auth (stdio).
+
+def _get_oidc_auth_provider(users_db, legacy_verifier=None):
+    """Build direct OAuth/OIDC resource-server auth for ChatGPT MCP clients.
+
+    The authorization server is external (Keycloak). FastMCP publishes RFC 9728
+    protected-resource metadata; clients then perform OAuth directly against the
+    issuer, including Dynamic Client Registration where supported.
+
+    The verified JWT email is mapped back to ``users.db`` so the rest of the
+    server continues to resolve the caller's personal Odoo credentials by the
+    existing registry user id.
+    """
+    from pydantic import AnyHttpUrl
+    from fastmcp.server.auth import MultiAuth, RemoteAuthProvider
+
+    from .auth_verifier import RegistryMappedJWTVerifier
+
+    issuer = os.environ.get("MCP_OIDC_ISSUER", "").rstrip("/")
+    public_url = os.environ.get("MCP_PUBLIC_URL", "").rstrip("/")
+    if not issuer:
+        raise RuntimeError("MCP_AUTH_MODE=oidc requires MCP_OIDC_ISSUER")
+    if not public_url:
+        raise RuntimeError("MCP_AUTH_MODE=oidc requires MCP_PUBLIC_URL")
+    if users_db is None:
+        raise RuntimeError("MCP_AUTH_MODE=oidc requires USERS_DB_PATH for per-user registry mapping")
+
+    jwks_uri = os.environ.get(
+        "MCP_OIDC_JWKS_URI",
+        f"{issuer}/protocol/openid-connect/certs",
+    )
+    audience = os.environ.get("MCP_OIDC_AUDIENCE") or None
+    email_claim = os.environ.get("MCP_OIDC_EMAIL_CLAIM", "email")
+    advertised_scopes = _csv_env("MCP_OIDC_SCOPES", "openid,profile,email")
+
+    verifier = RegistryMappedJWTVerifier(
+        users_db=users_db,
+        email_claim=email_claim,
+        jwks_uri=jwks_uri,
+        issuer=issuer,
+        audience=audience,
+        algorithm=os.environ.get("MCP_OIDC_ALGORITHM", "RS256"),
+        # Do not globally require identity scopes in the access token. Keycloak
+        # may omit an OpenID request scope from the access token's `scope` claim;
+        # the email claim itself is mandatory in RegistryMappedJWTVerifier.
+        required_scopes=None,
+    )
+
+    remote = RemoteAuthProvider(
+        token_verifier=verifier,
+        authorization_servers=[AnyHttpUrl(issuer)],
+        base_url=public_url,
+        scopes_supported=advertised_scopes,
+        resource_name=os.environ.get("MCP_RESOURCE_NAME", "KasbifyDev Odoo MCP"),
+    )
+
+    # OAuth owns discovery routes. Legacy registry/static bearer tokens remain
+    # accepted as a secondary verifier so existing integrations do not break.
+    if legacy_verifier is not None:
+        return MultiAuth(server=remote, verifiers=[legacy_verifier])
+    return remote
+
+
+def _get_auth_provider():
+    """Get the configured authentication provider.
+
+    Modes:
+    - ``oidc``: direct OAuth/OIDC against Keycloak, plus optional legacy tokens.
+    - ``registry``: existing users.db API keys, optionally with MCP_API_KEY fallback.
+    - ``static``: MCP_API_KEY only.
+    - ``none``: no HTTP auth (primarily stdio/local development).
+    - ``auto`` (default): OIDC when MCP_OIDC_ISSUER is set, otherwise preserve
+      the existing registry/static behavior.
     """
     api_key = os.environ.get("MCP_API_KEY")
 
     from .users_db import get_users_db
 
     users_db = get_users_db()
+    mode = os.environ.get("MCP_AUTH_MODE", "auto").strip().lower()
+    if mode == "auto":
+        mode = "oidc" if os.environ.get("MCP_OIDC_ISSUER") else ("registry" if users_db is not None else "static")
+
+    legacy_verifier = None
     if users_db is not None:
         from .auth_verifier import DbTokenVerifier
 
-        return DbTokenVerifier(users_db, static_api_key=api_key)
+        legacy_verifier = DbTokenVerifier(users_db, static_api_key=api_key)
 
-    if api_key:
+    if mode == "oidc":
+        return _get_oidc_auth_provider(users_db, legacy_verifier=legacy_verifier)
+
+    if mode == "registry":
+        if legacy_verifier is None:
+            raise RuntimeError("MCP_AUTH_MODE=registry requires USERS_DB_PATH")
+        return legacy_verifier
+
+    if mode == "static":
+        if not api_key:
+            return None
         from fastmcp.server.auth import StaticTokenVerifier
 
         return StaticTokenVerifier(
@@ -105,7 +189,11 @@ def _get_auth_provider():
                 }
             }
         )
-    return None
+
+    if mode == "none":
+        return None
+
+    raise RuntimeError(f"Unsupported MCP_AUTH_MODE={mode!r}; expected auto, oidc, registry, static, or none")
 
 
 # ----- Create MCP Server -----
