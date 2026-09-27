@@ -11,26 +11,14 @@ on:
       - 'plugins/kasbifydev/**'
       - '.agents/plugins/marketplace.json'
       - '.github/workflows/kasbifydev-plugin.yml'
-      - 'src/odoo_mcp/app.py'
-      - 'src/odoo_mcp/auth_verifier.py'
-      - 'src/odoo_mcp/users_db.py'
-      - 'tests/test_auth_verifier.py'
 
 jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - run: uv sync --extra dev
       - name: Validate plugin package
-        run: uv run python plugins/kasbifydev/scripts/validate_plugin.py
-      - name: Preview exact Black output
-        run: >-
-          uv run black --diff
-          src/odoo_mcp/app.py
-          src/odoo_mcp/auth_verifier.py
-          src/odoo_mcp/users_db.py
-          tests/test_auth_verifier.py
+        run: python plugins/kasbifydev/scripts/validate_plugin.py
