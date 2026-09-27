@@ -1,8 +1,9 @@
 """
 FastMCP application setup for the Odoo MCP Server.
 
-Creates the FastMCP instance with auth, lifespan, and icon loading.
-Other modules import `mcp` from here to register resources, tools, and prompts.
+Creates the FastMCP instance with auth, lifespan, icon loading, and the
+OpenAI-compatible authenticated profile tool. Other modules import `mcp` from
+here to register resources, tools, and prompts.
 """
 
 import base64
@@ -255,6 +256,70 @@ mcp = FastMCP(
     website_url=_website_url,
     icons=_icons,
 )
+
+
+# ----- Authenticated profile tool -----
+
+_PROFILE_OUTPUT_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": r"\S",
+            "description": "Opaque stable profile identifier for the authenticated connection.",
+        },
+        "name": {"type": "string"},
+        "email": {"type": "string"},
+        "nickname": {"type": "string"},
+    },
+    "required": ["id"],
+    "additionalProperties": False,
+}
+
+
+@mcp.tool(
+    name="get_profile",
+    title="Get KasbifyDev Profile",
+    description=(
+        "Return the profile represented by this request's authenticated credentials. "
+        "The opaque id remains stable across token refresh and reconnection."
+    ),
+    output_schema=_PROFILE_OUTPUT_SCHEMA,
+    annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+    meta={
+        "openai/profile": True,
+        "securitySchemes": [{"type": "oauth2", "scopes": []}],
+    },
+    icons=_icons,
+)
+def get_authenticated_profile() -> dict[str, str]:
+    """Return a stable profile derived only from validated credentials."""
+    from fastmcp.server.dependencies import get_access_token
+
+    token = get_access_token()
+    if token is None:
+        raise PermissionError("Authentication is required to read the current profile.")
+
+    claims = token.claims or {}
+    profile_id = claims.get("oidc_subject") or token.client_id
+    if not isinstance(profile_id, str) or not profile_id.strip():
+        raise PermissionError("Authenticated credentials do not contain a stable profile identifier.")
+
+    profile = {"id": profile_id.strip()}
+    name = claims.get("name")
+    email = claims.get("email")
+    if isinstance(name, str) and name.strip():
+        profile["name"] = name.strip()
+    if isinstance(email, str) and email.strip():
+        profile["email"] = email.strip()
+    return profile
 
 
 # ----- Per-user skill visibility (multi-user mode only) -----
