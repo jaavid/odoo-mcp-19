@@ -1,0 +1,20 @@
+{
+  "name": "kasbifydev",
+  "interface": {
+    "displayName": "KasbifyDev"
+  },
+  "plugins": [
+    {
+      "name": "kasbifydev",
+      "source": {
+        "source": "local",
+        "path": "./plugins/kasbifydev"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}
