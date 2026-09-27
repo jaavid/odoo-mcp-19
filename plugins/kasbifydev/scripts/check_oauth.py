@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -14,7 +13,13 @@ MCP_SCOPES = {"mcp:tools", "mcp:resources", "mcp:prompts"}
 
 
 def fetch_json(url: str) -> dict:
-    request = Request(url, headers={"Accept": "application/json", "User-Agent": "kasbifydev-oauth-check/0.1"})
+    request = Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "User-Agent": "kasbifydev-oauth-check/0.1",
+        },
+    )
     try:
         with urlopen(request, timeout=15) as response:
             payload = json.load(response)
@@ -100,9 +105,15 @@ def check(args: argparse.Namespace) -> int:
         has_dcr = bool(oidc.get("registration_endpoint"))
         has_cimd = oidc.get("client_id_metadata_document_supported") is True
         if not (has_dcr or has_cimd):
-            failures.append("OIDC metadata advertises neither DCR nor CIMD client registration")
+            failures.append(
+                "OIDC metadata advertises neither DCR nor CIMD client registration"
+            )
         else:
-            modes = [name for name, enabled in (("DCR", has_dcr), ("CIMD", has_cimd)) if enabled]
+            modes = [
+                name
+                for name, enabled in (("DCR", has_dcr), ("CIMD", has_cimd))
+                if enabled
+            ]
             print("OK client registration: " + " + ".join(modes))
 
         oidc_scopes = set(oidc.get("scopes_supported") or [])
@@ -127,8 +138,16 @@ def check(args: argparse.Namespace) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mcp-origin", required=True, help="Public MCP origin without /mcp")
-    parser.add_argument("--issuer", required=True, help="Exact Keycloak realm issuer")
+    parser.add_argument(
+        "--mcp-origin",
+        required=True,
+        help="Public MCP origin without /mcp",
+    )
+    parser.add_argument(
+        "--issuer",
+        required=True,
+        help="Exact Keycloak realm issuer",
+    )
     parser.add_argument(
         "--resource",
         help="Expected protected resource URL; defaults to <mcp-origin>/mcp",
