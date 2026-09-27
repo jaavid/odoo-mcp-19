@@ -5,7 +5,12 @@ import hashlib
 
 from fastmcp.server.auth.providers.jwt import RSAKeyPair
 
-from odoo_mcp.auth_verifier import ENV_ADMIN_CLIENT_ID, DbTokenVerifier, RegistryMappedJWTVerifier
+from odoo_mcp.auth_verifier import (
+    ENV_ADMIN_CLIENT_ID,
+    DbTokenVerifier,
+    RegistryMappedJWTVerifier,
+    SharedOIDCJWTVerifier,
+)
 from odoo_mcp.users_db import UsersDb
 
 
@@ -53,7 +58,9 @@ def test_unknown_token_rejected(users_db_seed):
 
 
 def test_static_fallback_maps_to_env_admin(users_db_seed):
-    verifier = DbTokenVerifier(UsersDb(users_db_seed.db_path), static_api_key="shared-static")
+    verifier = DbTokenVerifier(
+        UsersDb(users_db_seed.db_path), static_api_key="shared-static"
+    )
     token = _verify(verifier, "shared-static")
     assert token is not None
     assert token.client_id == ENV_ADMIN_CLIENT_ID
@@ -130,12 +137,15 @@ def test_oidc_token_maps_email_to_registry_user(users_db_seed):
         issuer="https://auth.example.test/realms/engineering",
         audience="kasbifydev-mcp",
         scopes=["openid", "profile", "email"],
-        additional_claims={"email": "member@cyanview.com", "azp": "chatgpt-dynamic-client"},
+        additional_claims={
+            "email": "member@cyanview.com",
+            "azp": "chatgpt-dynamic-client",
+        },
     )
     token = _verify(_oidc_verifier(users_db_seed, keypair), raw)
     assert token is not None
     assert token.client_id == users_db_seed.user_ids["member"]
-    assert token.claims["auth"] == "oidc"
+    assert token.claims["auth"] == "oidc-registry"
     assert token.claims["oidc_subject"] == "keycloak-subject-123"
     assert token.claims["oidc_client_id"] == "chatgpt-dynamic-client"
     assert token.claims["role"] == "support"
@@ -175,3 +185,79 @@ def test_oidc_wrong_audience_rejected_before_registry_mapping(users_db_seed):
         additional_claims={"email": "member@cyanview.com"},
     )
     assert _verify(_oidc_verifier(users_db_seed, keypair), raw) is None
+
+
+def _shared_oidc_verifier(
+    keypair: RSAKeyPair,
+    *,
+    shared_role="readonly",
+    required_realm_role="kasbifydev",
+    allowed_emails=frozenset(),
+):
+    return SharedOIDCJWTVerifier(
+        public_key=keypair.public_key,
+        issuer="https://auth.example.test/realms/engineering",
+        audience="https://mcp.example.test/mcp",
+        algorithm="RS256",
+        shared_role=shared_role,
+        required_realm_role=required_realm_role,
+        allowed_emails=allowed_emails,
+    )
+
+
+def _shared_token(
+    keypair: RSAKeyPair,
+    *,
+    email="member@example.test",
+    roles=("kasbifydev",),
+):
+    return keypair.create_token(
+        subject="keycloak-user-42",
+        issuer="https://auth.example.test/realms/engineering",
+        audience="https://mcp.example.test/mcp",
+        scopes=["openid", "profile", "email", "mcp:tools"],
+        additional_claims={
+            "email": email,
+            "realm_access": {"roles": list(roles)},
+            "azp": "chatgpt-client",
+        },
+    )
+
+
+def test_shared_oidc_readonly_is_default():
+    keypair = RSAKeyPair.generate()
+    token = _verify(_shared_oidc_verifier(keypair), _shared_token(keypair))
+    assert token is not None
+    assert token.client_id == "keycloak-user-42"
+    assert token.claims["auth"] == "oidc-shared"
+    assert token.claims["odoo_identity"] == "service-account"
+    assert token.claims["role"] == "readonly"
+    assert "read" in token.scopes
+    assert "write" not in token.scopes
+
+
+def test_shared_oidc_support_role_enables_gated_writes():
+    keypair = RSAKeyPair.generate()
+    token = _verify(
+        _shared_oidc_verifier(keypair, shared_role="support"),
+        _shared_token(keypair),
+    )
+    assert token is not None
+    assert token.claims["role"] == "support"
+    assert "write" in token.scopes
+
+
+def test_shared_oidc_requires_configured_keycloak_realm_role():
+    keypair = RSAKeyPair.generate()
+    raw = _shared_token(keypair, roles=("employee",))
+    assert _verify(_shared_oidc_verifier(keypair), raw) is None
+
+
+def test_shared_oidc_optional_email_allowlist_is_case_insensitive():
+    keypair = RSAKeyPair.generate()
+    verifier = _shared_oidc_verifier(
+        keypair,
+        allowed_emails=frozenset({"Member@Example.Test"}),
+    )
+    assert _verify(verifier, _shared_token(keypair, email="member@example.test")) is not None
+    assert _verify(verifier, _shared_token(keypair, email="other@example.test")) is None
