@@ -23,7 +23,12 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class ApiKeyIdentity:
-    """The user owning a verified API key."""
+    """An active registry user's identity.
+
+    The historical name is kept for compatibility: the same identity object is
+    now also used after a Keycloak/OIDC token has been verified and mapped by
+    email.
+    """
 
     user_id: str
     name: str
@@ -52,6 +57,10 @@ class UsersDb:
         conn.row_factory = sqlite3.Row
         return conn
 
+    @staticmethod
+    def _identity_from_row(row: sqlite3.Row) -> ApiKeyIdentity:
+        return ApiKeyIdentity(user_id=row["id"], name=row["name"], email=row["email"], role=row["role"])
+
     def lookup_api_key(self, key_hash: str) -> ApiKeyIdentity | None:
         """Find the active user owning a non-revoked 'odoo' key by hash."""
         with self._connect() as conn:
@@ -64,7 +73,27 @@ class UsersDb:
             ).fetchone()
         if row is None:
             return None
-        return ApiKeyIdentity(user_id=row["id"], name=row["name"], email=row["email"], role=row["role"])
+        return self._identity_from_row(row)
+
+    def lookup_active_user_by_email(self, email: str) -> ApiKeyIdentity | None:
+        """Map an authenticated OIDC email claim to exactly one active registry user.
+
+        Email matching is case-insensitive. Ambiguous duplicate active emails are
+        rejected rather than selecting an arbitrary account, because the returned
+        ``user_id`` becomes the key for per-user Odoo credentials.
+        """
+        normalized = email.strip()
+        if not normalized:
+            return None
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, name, email, role FROM users"
+                " WHERE is_active = 1 AND lower(email) = lower(?) LIMIT 2",
+                (normalized,),
+            ).fetchall()
+        if len(rows) != 1:
+            return None
+        return self._identity_from_row(rows[0])
 
     def get_odoo_credentials(self, user_id: str) -> OdooCredentials | None:
         with self._connect() as conn:
