@@ -150,9 +150,7 @@ class SharedOIDCJWTVerifier(JWTVerifier):
     ) -> None:
         super().__init__(**kwargs)
         if shared_role not in _ALLOWED_SHARED_ROLES:
-            raise ValueError(
-                f"shared_role must be one of {sorted(_ALLOWED_SHARED_ROLES)}, got {shared_role!r}"
-            )
+            raise ValueError(f"shared_role must be one of {sorted(_ALLOWED_SHARED_ROLES)}, got {shared_role!r}")
         self._email_claim = email_claim
         self._shared_role = shared_role
         self._required_realm_role = required_realm_role.strip() if required_realm_role else None

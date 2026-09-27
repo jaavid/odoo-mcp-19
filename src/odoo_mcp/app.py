@@ -177,18 +177,12 @@ def _get_oidc_auth_provider(users_db, legacy_verifier=None):
         verifier = SharedOIDCJWTVerifier(
             email_claim=email_claim,
             shared_role=os.environ.get("MCP_OIDC_SHARED_ROLE", "readonly").strip().lower(),
-            required_realm_role=os.environ.get(
-                "MCP_OIDC_REQUIRED_REALM_ROLE", "kasbifydev"
-            )
-            or None,
+            required_realm_role=os.environ.get("MCP_OIDC_REQUIRED_REALM_ROLE", "kasbifydev") or None,
             allowed_emails=allowed_emails,
             **verifier_kwargs,
         )
     else:
-        raise RuntimeError(
-            "Unsupported MCP_OIDC_IDENTITY_MODE="
-            f"{identity_mode!r}; expected registry or shared"
-        )
+        raise RuntimeError("Unsupported MCP_OIDC_IDENTITY_MODE=" f"{identity_mode!r}; expected registry or shared")
 
     keycloak = KeycloakAuthProvider(
         realm_url=issuer,
@@ -244,9 +238,7 @@ def _get_auth_provider():
     if mode == "none":
         return None
 
-    raise RuntimeError(
-        f"Unsupported MCP_AUTH_MODE={mode!r}; expected auto, oidc, registry, static, or none"
-    )
+    raise RuntimeError(f"Unsupported MCP_AUTH_MODE={mode!r}; expected auto, oidc, registry, static, or none")
 
 
 # ----- Create MCP Server -----

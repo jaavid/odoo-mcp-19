@@ -92,8 +92,7 @@ class UsersDb:
             return None
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT id, name, email, role FROM users"
-                " WHERE is_active = 1 AND lower(email) = lower(?) LIMIT 2",
+                "SELECT id, name, email, role FROM users" " WHERE is_active = 1 AND lower(email) = lower(?) LIMIT 2",
                 (normalized,),
             ).fetchall()
         if len(rows) != 1:
@@ -118,9 +117,7 @@ class UsersDb:
 
     def get_skills(self, user_id: str) -> frozenset[str]:
         with self._connect() as conn:
-            rows = conn.execute(
-                "SELECT skill_name FROM user_skills WHERE user_id = ?", (user_id,)
-            ).fetchall()
+            rows = conn.execute("SELECT skill_name FROM user_skills WHERE user_id = ?", (user_id,)).fetchall()
         return frozenset(row["skill_name"] for row in rows)
 
 
