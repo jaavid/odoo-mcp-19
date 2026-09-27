@@ -8,7 +8,6 @@ import json
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-
 MCP_SCOPES = {"mcp:tools", "mcp:resources", "mcp:prompts"}
 
 
@@ -59,17 +58,13 @@ def check(args: argparse.Namespace) -> int:
 
     actual_resource = resource_meta.get("resource")
     if actual_resource != expected_resource:
-        failures.append(
-            f"resource mismatch: expected {expected_resource!r}, got {actual_resource!r}"
-        )
+        failures.append(f"resource mismatch: expected {expected_resource!r}, got {actual_resource!r}")
     else:
         print(f"OK resource: {actual_resource}")
 
     authorization_servers = resource_meta.get("authorization_servers", [])
     if issuer not in authorization_servers:
-        failures.append(
-            f"issuer {issuer!r} missing from authorization_servers={authorization_servers!r}"
-        )
+        failures.append(f"issuer {issuer!r} missing from authorization_servers={authorization_servers!r}")
     else:
         print(f"OK authorization server: {issuer}")
 
@@ -77,8 +72,7 @@ def check(args: argparse.Namespace) -> int:
     missing_resource_scopes = MCP_SCOPES - advertised_scopes
     if missing_resource_scopes:
         failures.append(
-            "protected-resource metadata is missing MCP scopes: "
-            + ", ".join(sorted(missing_resource_scopes))
+            "protected-resource metadata is missing MCP scopes: " + ", ".join(sorted(missing_resource_scopes))
         )
     else:
         print("OK protected-resource MCP scopes")
@@ -93,9 +87,7 @@ def check(args: argparse.Namespace) -> int:
 
     if oidc:
         if oidc.get("issuer") != issuer:
-            failures.append(
-                f"OIDC issuer mismatch: expected {issuer!r}, got {oidc.get('issuer')!r}"
-            )
+            failures.append(f"OIDC issuer mismatch: expected {issuer!r}, got {oidc.get('issuer')!r}")
         methods = set(oidc.get("code_challenge_methods_supported") or [])
         if "S256" not in methods:
             failures.append("OIDC metadata does not advertise PKCE S256")
@@ -105,24 +97,15 @@ def check(args: argparse.Namespace) -> int:
         has_dcr = bool(oidc.get("registration_endpoint"))
         has_cimd = oidc.get("client_id_metadata_document_supported") is True
         if not (has_dcr or has_cimd):
-            failures.append(
-                "OIDC metadata advertises neither DCR nor CIMD client registration"
-            )
+            failures.append("OIDC metadata advertises neither DCR nor CIMD client registration")
         else:
-            modes = [
-                name
-                for name, enabled in (("DCR", has_dcr), ("CIMD", has_cimd))
-                if enabled
-            ]
+            modes = [name for name, enabled in (("DCR", has_dcr), ("CIMD", has_cimd)) if enabled]
             print("OK client registration: " + " + ".join(modes))
 
         oidc_scopes = set(oidc.get("scopes_supported") or [])
         missing_oidc_scopes = MCP_SCOPES - oidc_scopes
         if missing_oidc_scopes:
-            failures.append(
-                "Keycloak discovery is missing MCP scopes: "
-                + ", ".join(sorted(missing_oidc_scopes))
-            )
+            failures.append("Keycloak discovery is missing MCP scopes: " + ", ".join(sorted(missing_oidc_scopes)))
         else:
             print("OK Keycloak MCP scopes")
 
