@@ -1,0 +1,38 @@
+{
+  "name": "kasbifydev",
+  "version": "0.1.0",
+  "description": "Kasbify developer operations for inspecting and managing Odoo through a remote MCP backend.",
+  "author": {
+    "name": "Kasbify"
+  },
+  "homepage": "https://github.com/jaavid/odoo-mcp-19",
+  "repository": "https://github.com/jaavid/odoo-mcp-19",
+  "license": "MIT",
+  "keywords": [
+    "kasbify",
+    "odoo",
+    "mcp",
+    "developer-tools",
+    "erp",
+    "automation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "KasbifyDev",
+    "shortDescription": "Inspect and operate Odoo from ChatGPT and Codex",
+    "longDescription": "KasbifyDev packages safe Odoo engineering workflows around a remote MCP server. It guides schema discovery, read operations, controlled writes, troubleshooting, and project or CRM maintenance without guessing Odoo fields or bypassing confirmation gates.",
+    "developerName": "Kasbify",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/jaavid/odoo-mcp-19",
+    "defaultPrompt": [
+      "Inspect this Odoo environment and summarize the current state before making changes",
+      "Find the relevant Odoo records and make the requested change safely",
+      "Diagnose this Odoo problem using schema and method discovery before proposing a fix"
+    ]
+  }
+}
