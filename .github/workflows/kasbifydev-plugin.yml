@@ -1,0 +1,24 @@
+name: KasbifyDev plugin checks
+
+on:
+  push:
+    paths:
+      - 'plugins/kasbifydev/**'
+      - '.agents/plugins/marketplace.json'
+      - '.github/workflows/kasbifydev-plugin.yml'
+  pull_request:
+    paths:
+      - 'plugins/kasbifydev/**'
+      - '.agents/plugins/marketplace.json'
+      - '.github/workflows/kasbifydev-plugin.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Validate plugin package
+        run: python plugins/kasbifydev/scripts/validate_plugin.py
