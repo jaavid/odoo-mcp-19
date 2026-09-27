@@ -1,42 +1,73 @@
 # KasbifyDev installation
 
-KasbifyDev is packaged as a ChatGPT/Codex plugin that binds to a separately registered ChatGPT App.
+KasbifyDev is packaged as a ChatGPT/Codex plugin that binds to a separately registered ChatGPT App backed by the remote Odoo MCP server.
 
-## Backend
+## 1. Prepare OAuth
 
-Remote MCP endpoint:
+Configure Keycloak first. Follow `KEYCLOAK.md` and create the `kasbifydev` realm role plus the MCP client scopes and audience mappers.
 
-`https://odoo-mcp-19-cff81cc6.alpic.live`
+Enable OAuth on the Alpic deployment with shared identity and keep it read-only for the initial connection test:
 
-The MCP transport is Streamable HTTP and is deployed on Alpic.
+```env
+MCP_AUTH_MODE=oidc
+MCP_OIDC_IDENTITY_MODE=shared
+MCP_OIDC_ISSUER=https://auth.dev.yektaertebat.ir/realms/engineering
+MCP_OIDC_REQUIRED_REALM_ROLE=kasbifydev
+MCP_OIDC_SHARED_ROLE=readonly
+MCP_OIDC_SCOPES=openid,profile,email,mcp:tools,mcp:resources,mcp:prompts
+```
 
-## 1. Register the ChatGPT App
+The canonical protected resource is:
 
-Create a ChatGPT App backed by the remote MCP endpoint above. Give it the user-facing name `KasbifyDev`.
+`https://odoo-mcp-19-cff81cc6.alpic.live/mcp`
 
-After ChatGPT creates the app, copy its canonical App ID.
-
-## 2. Bind the App ID
+## 2. Validate OAuth discovery
 
 From the repository root:
+
+```bash
+python plugins/kasbifydev/scripts/check_oauth.py \
+  --mcp-origin https://odoo-mcp-19-cff81cc6.alpic.live \
+  --issuer https://auth.dev.yektaertebat.ir/realms/engineering
+```
+
+Do not proceed until the checker reports the expected resource, issuer, PKCE capability, client-registration capability, and MCP scopes.
+
+## 3. Register the ChatGPT App
+
+Register the remote MCP endpoint as a ChatGPT App with display name `KasbifyDev` and complete its OAuth connection. See `APP_REGISTRATION.md` for the exact values.
+
+After ChatGPT creates the App, copy its canonical App ID.
+
+## 4. Bind the App ID
 
 ```bash
 python plugins/kasbifydev/scripts/bind_app.py '<CHATGPT_APP_ID>'
 python plugins/kasbifydev/scripts/validate_plugin.py
 ```
 
-Do not commit a credential, bearer token, Odoo password, or API key into `.app.json`. The file contains only the ChatGPT App identifier.
+`.app.json` contains only the ChatGPT App identifier. Never place an Odoo credential, Keycloak token, MCP API key, cookie, or private key in the plugin package.
 
-## 3. Plugin files
+## 5. Install or sync the plugin
 
-- `.codex-plugin/plugin.json`: plugin identity and UI metadata
-- `.app.json`: binding from the plugin to the registered ChatGPT App
-- `skills/`: operational guidance used when KasbifyDev is invoked
+The plugin manifest is `plugins/kasbifydev/.codex-plugin/plugin.json`; the repository marketplace entry lives under `.agents/plugins/marketplace.json`.
 
-## 4. Expected invocation
+Install/sync it in the supported ChatGPT/Codex surface, then explicitly invoke the app through the plugin.
 
-Once the app/plugin is installed in a supported ChatGPT surface, use it explicitly, for example:
+## 6. Smoke-test read access
+
+Example:
 
 `@KasbifyDev پروژه Engineering را در Odoo بررسی کن و تسک‌های باز را خلاصه کن.`
 
-For mutations, the MCP server's safety layer remains authoritative. Operations classified as dangerous must pass the server-side confirmation-token flow.
+Confirm that the request authenticates with Keycloak and that only the intended Odoo environment is visible.
+
+## 7. Enable writes deliberately
+
+Only after read-only OAuth works end-to-end, change the hosted deployment to the intended role, for example:
+
+```env
+MCP_OIDC_SHARED_ROLE=support
+```
+
+The server's strict safety classifier and confirmation-token flow remain active. A write-capable OAuth identity does not bypass those controls.
