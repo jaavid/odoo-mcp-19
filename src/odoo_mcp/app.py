@@ -82,18 +82,18 @@ def _csv_env(name: str, default: str = "") -> list[str]:
 
 
 def _get_oidc_auth_provider(users_db, legacy_verifier=None):
-    """Build direct OAuth/OIDC resource-server auth for ChatGPT MCP clients.
+    """Build Keycloak OAuth/OIDC auth for ChatGPT-compatible MCP clients.
 
-    The authorization server is external (Keycloak). FastMCP publishes RFC 9728
-    protected-resource metadata; clients then perform OAuth directly against the
-    issuer, including Dynamic Client Registration where supported.
+    FastMCP's Keycloak provider publishes RFC 9728 protected-resource metadata
+    and points MCP clients directly at the realm authorization server. Keycloak
+    handles OAuth 2.1 / OIDC and Dynamic Client Registration (DCR).
 
-    The verified JWT email is mapped back to ``users.db`` so the rest of the
-    server continues to resolve the caller's personal Odoo credentials by the
-    existing registry user id.
+    A custom JWT verifier maps the *verified* email claim back to ``users.db``.
+    The resulting registry user id is exposed as FastMCP's ``client_id``, so the
+    existing per-user Odoo credential and skill resolution works unchanged.
     """
-    from pydantic import AnyHttpUrl
-    from fastmcp.server.auth import MultiAuth, RemoteAuthProvider
+    from fastmcp.server.auth import MultiAuth
+    from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
 
     from .auth_verifier import RegistryMappedJWTVerifier
 
@@ -112,7 +112,7 @@ def _get_oidc_auth_provider(users_db, legacy_verifier=None):
     )
     audience = os.environ.get("MCP_OIDC_AUDIENCE") or None
     email_claim = os.environ.get("MCP_OIDC_EMAIL_CLAIM", "email")
-    advertised_scopes = _csv_env("MCP_OIDC_SCOPES", "openid,profile,email")
+    required_scopes = _csv_env("MCP_OIDC_SCOPES", "openid,profile,email")
 
     verifier = RegistryMappedJWTVerifier(
         users_db=users_db,
@@ -121,32 +121,30 @@ def _get_oidc_auth_provider(users_db, legacy_verifier=None):
         issuer=issuer,
         audience=audience,
         algorithm=os.environ.get("MCP_OIDC_ALGORITHM", "RS256"),
-        # Do not globally require identity scopes in the access token. Keycloak
-        # may omit an OpenID request scope from the access token's `scope` claim;
-        # the email claim itself is mandatory in RegistryMappedJWTVerifier.
-        required_scopes=None,
+        required_scopes=required_scopes,
     )
 
-    remote = RemoteAuthProvider(
-        token_verifier=verifier,
-        authorization_servers=[AnyHttpUrl(issuer)],
+    keycloak = KeycloakAuthProvider(
+        realm_url=issuer,
         base_url=public_url,
-        scopes_supported=advertised_scopes,
-        resource_name=os.environ.get("MCP_RESOURCE_NAME", "KasbifyDev Odoo MCP"),
+        required_scopes=required_scopes,
+        audience=audience,
+        token_verifier=verifier,
     )
 
-    # OAuth owns discovery routes. Legacy registry/static bearer tokens remain
-    # accepted as a secondary verifier so existing integrations do not break.
+    # OAuth owns discovery routes. Existing personal registry keys and the
+    # optional static fallback remain accepted by MultiAuth, which makes the
+    # migration non-breaking for existing non-ChatGPT clients.
     if legacy_verifier is not None:
-        return MultiAuth(server=remote, verifiers=[legacy_verifier])
-    return remote
+        return MultiAuth(server=keycloak, verifiers=[legacy_verifier])
+    return keycloak
 
 
 def _get_auth_provider():
     """Get the configured authentication provider.
 
     Modes:
-    - ``oidc``: direct OAuth/OIDC against Keycloak, plus optional legacy tokens.
+    - ``oidc``: Keycloak OAuth/OIDC, plus optional legacy registry/static tokens.
     - ``registry``: existing users.db API keys, optionally with MCP_API_KEY fallback.
     - ``static``: MCP_API_KEY only.
     - ``none``: no HTTP auth (primarily stdio/local development).
