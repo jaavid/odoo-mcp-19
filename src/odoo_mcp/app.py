@@ -112,12 +112,14 @@ def _get_auth_provider():
 
 _auth = _get_auth_provider()
 _icons = [ODOO_ICON] if ODOO_ICON else None
+_server_name = os.environ.get("MCP_SERVER_NAME", "KasbifyDev")
+_website_url = os.environ.get("MCP_WEBSITE_URL", "https://github.com/jaavid/odoo-mcp-19")
 
 mcp = FastMCP(
-    "Odoo 19+ MCP Server",
+    _server_name,
     lifespan=app_lifespan,
     auth=_auth,
-    website_url="https://github.com/AlanOgic/odoo-mcp-19",
+    website_url=_website_url,
     icons=_icons,
 )
 
