@@ -1,14 +1,34 @@
 # Registering KasbifyDev in ChatGPT
 
-The repository cannot manufacture a ChatGPT App ID. The App is an account/workspace object created by ChatGPT, then referenced by this plugin.
+The ChatGPT App is an account/workspace object. This repository can prepare the MCP backend and plugin package, but the App itself must be created in a supported ChatGPT surface and its canonical App ID then bound into `.app.json`.
 
-Use these values when registering the app:
+## Registration values
+
+Use:
 
 - Name: `KasbifyDev`
-- MCP endpoint: `https://odoo-mcp-19-cff81cc6.alpic.live`
+- MCP origin: `https://odoo-mcp-19-cff81cc6.alpic.live`
+- MCP resource endpoint: `https://odoo-mcp-19-cff81cc6.alpic.live/mcp`
 - Transport: Streamable HTTP
-- Purpose: Odoo 19 project, CRM, calendar, task and operational access through the existing MCP tools
+- Authentication: OAuth 2.1 / OIDC through Keycloak
+- Authorization server: `https://auth.dev.yektaertebat.ir/realms/engineering`
+- Purpose: Odoo 19 project, task, CRM, calendar, contact, inspection, troubleshooting, and controlled mutation workflows
 
-After registration, replace `REPLACE_WITH_CHATGPT_APP_ID` in `.app.json` using `scripts/bind_app.py`.
+Before registration, run `scripts/check_oauth.py`; ChatGPT must be able to discover the protected-resource metadata and the Keycloak authorization-server metadata without a private network dependency.
 
-The MCP backend already handles authentication independently. Never place Odoo credentials or MCP bearer tokens in the plugin manifest.
+## Authentication expectations
+
+ChatGPT should authenticate the human user with OAuth. Do not configure the plugin with the Odoo credential or the legacy static MCP bearer token.
+
+For the initial App registration, keep `MCP_OIDC_SHARED_ROLE=readonly`. After the connection and read smoke test are proven, write capability can be deliberately enabled on the server while retaining the MCP safety confirmation gates.
+
+## Bind the resulting App ID
+
+After ChatGPT creates the App, run:
+
+```bash
+python plugins/kasbifydev/scripts/bind_app.py '<CHATGPT_APP_ID>'
+python plugins/kasbifydev/scripts/validate_plugin.py
+```
+
+Commit only the resulting App identifier. Tokens and credentials remain outside the repository.
