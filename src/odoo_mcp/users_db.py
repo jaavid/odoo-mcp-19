@@ -59,7 +59,12 @@ class UsersDb:
 
     @staticmethod
     def _identity_from_row(row: sqlite3.Row) -> ApiKeyIdentity:
-        return ApiKeyIdentity(user_id=row["id"], name=row["name"], email=row["email"], role=row["role"])
+        return ApiKeyIdentity(
+            user_id=row["id"],
+            name=row["name"],
+            email=row["email"],
+            role=row["role"],
+        )
 
     def lookup_api_key(self, key_hash: str) -> ApiKeyIdentity | None:
         """Find the active user owning a non-revoked 'odoo' key by hash."""
@@ -113,7 +118,9 @@ class UsersDb:
 
     def get_skills(self, user_id: str) -> frozenset[str]:
         with self._connect() as conn:
-            rows = conn.execute("SELECT skill_name FROM user_skills WHERE user_id = ?", (user_id,)).fetchall()
+            rows = conn.execute(
+                "SELECT skill_name FROM user_skills WHERE user_id = ?", (user_id,)
+            ).fetchall()
         return frozenset(row["skill_name"] for row in rows)
 
 
