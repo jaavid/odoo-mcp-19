@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "description": "Kasbify developer operations for inspecting and managing Odoo through a remote MCP backend.",
   "author": {
-    "name": "Kasbify"
+    "name": "Kasbify",
+    "url": "https://github.com/jaavid"
   },
   "homepage": "https://github.com/jaavid/odoo-mcp-19",
   "repository": "https://github.com/jaavid/odoo-mcp-19",
@@ -17,6 +18,7 @@
     "automation"
   ],
   "skills": "./skills/",
+  "apps": "./.app.json",
   "interface": {
     "displayName": "KasbifyDev",
     "shortDescription": "Inspect and operate Odoo from ChatGPT and Codex",
