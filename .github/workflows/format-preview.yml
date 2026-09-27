@@ -1,0 +1,31 @@
+name: Format preview
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/format-preview.yml
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          python-version: "3.13"
+      - run: uv sync --extra dev
+      - name: Format and print
+        run: |
+          uv run black src/odoo_mcp/registry_admin.py src/odoo_mcp/token_crypto.py
+          uv run isort src/odoo_mcp/registry_admin.py src/odoo_mcp/token_crypto.py
+          echo '===REGISTRY_ADMIN_BEGIN==='
+          cat src/odoo_mcp/registry_admin.py
+          echo '===REGISTRY_ADMIN_END==='
+          echo '===TOKEN_CRYPTO_BEGIN==='
+          cat src/odoo_mcp/token_crypto.py
+          echo '===TOKEN_CRYPTO_END==='
