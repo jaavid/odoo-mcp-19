@@ -1,15 +1,16 @@
 services:
   odoo-mcp:
-    build: .
+    image: ${MCP_IMAGE:-ghcr.io/jaavid/odoo-mcp-19:latest}
     container_name: odoo-mcp-19
+    restart: unless-stopped
     ports:
       - "${MCP_BIND:-127.0.0.1}:${MCP_PORT:-8080}:${MCP_PORT:-8080}"
     environment:
-      # Odoo connection (global instance; in multi-user mode the per-user
-      # credentials come from the shared registry instead of env)
+      # Odoo instance. In multi-user mode the URL/database stay global while
+      # username/API key are resolved per authenticated registry user.
       - ODOO_URL=${ODOO_URL}
       - ODOO_DB=${ODOO_DB}
-      # Env identity — needed for stdio mode or the MCP_API_KEY fallback only
+      # Optional env identity for stdio or the MCP_API_KEY fallback only.
       - ODOO_USERNAME=${ODOO_USERNAME:-}
       - ODOO_API_KEY=${ODOO_API_KEY:-}
       - ODOO_PASSWORD=${ODOO_PASSWORD:-}
@@ -19,8 +20,8 @@ services:
       - MCP_TRANSPORT=${MCP_TRANSPORT:-streamable-http}
       - MCP_HOST=0.0.0.0
       - MCP_PORT=${MCP_PORT:-8080}
-      # Single static key. Optional when the multi-user registry is mounted
-      # (see docker-compose.multiuser.yml); startup validates one is present.
+      # Optional single shared fallback key. Leave empty in normal multi-user
+      # deployments so every request is attributable to an individual user.
       - MCP_API_KEY=${MCP_API_KEY:-}
       # Safety & DX
       - MCP_SAFETY_MODE=${MCP_SAFETY_MODE:-strict}

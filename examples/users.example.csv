@@ -1,0 +1,4 @@
+name,email,role,odoo_username,odoo_api_key,skills
+Javid Momeni,javid@example.com,admin,javid@example.com,PASTE_ODOO_API_KEY_HERE,
+Mahmoud Example,mahmoud@example.com,user,mahmoud@example.com,PASTE_ODOO_API_KEY_HERE,
+Read Only Example,readonly@example.com,readonly,readonly@example.com,PASTE_ODOO_API_KEY_HERE,

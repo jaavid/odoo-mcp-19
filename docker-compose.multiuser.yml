@@ -1,23 +1,44 @@
-# Multi-user overlay: per-user keys + personal Odoo credentials from the
-# CLORAG-managed registry (users.db). Usage on the clorag host:
+# Multi-user overlay.
 #
-#   USERS_DB_HOST_DIR=/opt/clorag/data \
-#   TOKEN_ENCRYPTION_KEY_SECRET=/opt/clorag/secrets/token_encryption_key \
+# Runtime:
 #   docker compose -f docker-compose.yml -f docker-compose.multiuser.yml up -d
 #
-# The token_encryption_key secret MUST hold the same value as CLORAG's
-# (recommended: same content as admin_password, chmod 644). The registry is
-# mounted read-only — CLORAG remains the only writer.
+# Registry administration:
+#   docker compose -f docker-compose.yml -f docker-compose.multiuser.yml \
+#     run --rm registry-admin <command>
+#
+# The MCP service mounts the registry read-only. Only the one-shot
+# registry-admin service mounts it read-write.
+
 services:
   odoo-mcp:
     environment:
       - USERS_DB_PATH=/registry/users.db
       - TOKEN_ENCRYPTION_KEY_FILE=/run/secrets/token_encryption_key
     volumes:
-      - ${USERS_DB_HOST_DIR:-/opt/clorag/data}:/registry:ro
+      - ${USERS_DB_HOST_DIR:-./data}:/registry:ro
     secrets:
       - token_encryption_key
 
+  registry-admin:
+    image: ${MCP_IMAGE:-ghcr.io/jaavid/odoo-mcp-19:latest}
+    profiles:
+      - admin
+    # One-shot maintenance container; root avoids host bind-mount ownership
+    # surprises. The long-running MCP container still runs as uid 1001.
+    user: "0:0"
+    environment:
+      - USERS_DB_PATH=/registry/users.db
+      - TOKEN_ENCRYPTION_KEY_FILE=/run/secrets/token_encryption_key
+    volumes:
+      - ${USERS_DB_HOST_DIR:-./data}:/registry
+    secrets:
+      - token_encryption_key
+    entrypoint:
+      - python
+      - -m
+      - odoo_mcp.registry_admin
+
 secrets:
   token_encryption_key:
-    file: ${TOKEN_ENCRYPTION_KEY_SECRET:-/opt/clorag/secrets/token_encryption_key}
+    file: ${TOKEN_ENCRYPTION_KEY_SECRET:-./secrets/token_encryption_key}
