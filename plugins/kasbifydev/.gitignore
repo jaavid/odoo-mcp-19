@@ -1,0 +1,4 @@
+# No secrets belong in this plugin package.
+*.secret
+.env
+.env.*
