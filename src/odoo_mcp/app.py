@@ -91,6 +91,12 @@ def _public_url() -> str:
     return value.rstrip("/")
 
 
+def _resource_url(public_url: str) -> str:
+    """Match the URL FastMCP advertises as the protected MCP resource."""
+    mcp_path = os.environ.get("FASTMCP_STREAMABLE_HTTP_PATH", "/mcp").strip() or "/mcp"
+    return f"{public_url.rstrip('/')}/{mcp_path.lstrip('/')}"
+
+
 def _build_legacy_verifier(users_db, api_key: str | None):
     """Preserve existing personal/static bearer clients during OAuth migration."""
     if users_db is not None:
@@ -136,13 +142,7 @@ def _get_oidc_auth_provider(users_db, legacy_verifier=None):
     if not public_url:
         raise RuntimeError("MCP_AUTH_MODE=oidc requires MCP_PUBLIC_URL or ALPIC_HOST")
 
-    audience = os.environ.get("MCP_OIDC_AUDIENCE") or None
-    if audience is None:
-        logger.warning(
-            "MCP_OIDC_AUDIENCE is unset; token audience validation is disabled. "
-            "Set it to the exact MCP resource URL before production use."
-        )
-
+    audience = os.environ.get("MCP_OIDC_AUDIENCE") or _resource_url(public_url)
     jwks_uri = os.environ.get(
         "MCP_OIDC_JWKS_URI",
         f"{issuer}/protocol/openid-connect/certs",
@@ -177,7 +177,10 @@ def _get_oidc_auth_provider(users_db, legacy_verifier=None):
         verifier = SharedOIDCJWTVerifier(
             email_claim=email_claim,
             shared_role=os.environ.get("MCP_OIDC_SHARED_ROLE", "readonly").strip().lower(),
-            required_realm_role=os.environ.get("MCP_OIDC_REQUIRED_REALM_ROLE") or None,
+            required_realm_role=os.environ.get(
+                "MCP_OIDC_REQUIRED_REALM_ROLE", "kasbifydev"
+            )
+            or None,
             allowed_emails=allowed_emails,
             **verifier_kwargs,
         )
