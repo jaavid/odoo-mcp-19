@@ -1,0 +1,8 @@
+{
+  "apps": {
+    "kasbifydev": {
+      "id": "REPLACE_WITH_CHATGPT_APP_ID",
+      "required": true
+    }
+  }
+}
