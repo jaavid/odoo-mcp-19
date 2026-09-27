@@ -17,8 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           python-version: '3.13'
+      - run: uv sync --extra dev
       - name: Validate plugin package
-        run: python plugins/kasbifydev/scripts/validate_plugin.py
+        run: uv run python plugins/kasbifydev/scripts/validate_plugin.py
+      - name: Preview exact Black output for OAuth checker
+        run: uv run black --diff plugins/kasbifydev/scripts/check_oauth.py
