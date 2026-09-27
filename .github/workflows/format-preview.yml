@@ -19,13 +19,15 @@ jobs:
         with:
           python-version: "3.13"
       - run: uv sync --extra dev
-      - name: Format and print
+      - name: Format files
         run: |
           uv run black src/odoo_mcp/registry_admin.py src/odoo_mcp/token_crypto.py
           uv run isort src/odoo_mcp/registry_admin.py src/odoo_mcp/token_crypto.py
-          echo '===REGISTRY_ADMIN_BEGIN==='
-          cat src/odoo_mcp/registry_admin.py
-          echo '===REGISTRY_ADMIN_END==='
-          echo '===TOKEN_CRYPTO_BEGIN==='
-          cat src/odoo_mcp/token_crypto.py
-          echo '===TOKEN_CRYPTO_END==='
+      - name: Upload formatted files
+        uses: actions/upload-artifact@v4
+        with:
+          name: formatted-registry-files
+          path: |
+            src/odoo_mcp/registry_admin.py
+            src/odoo_mcp/token_crypto.py
+          if-no-files-found: error
