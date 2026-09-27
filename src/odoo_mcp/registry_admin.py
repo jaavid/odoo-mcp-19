@@ -399,10 +399,7 @@ def cmd_list_users(args: argparse.Namespace) -> int:
         )
         for row in rows
     ]
-    widths = [
-        max(len(headers[i]), *(len(str(row[i])) for row in data))
-        for i in range(len(headers))
-    ]
+    widths = [max(len(headers[i]), *(len(str(row[i])) for row in data)) for i in range(len(headers))]
     print("  ".join(headers[i].ljust(widths[i]) for i in range(len(headers))))
     print("  ".join("-" * widths[i] for i in range(len(headers))))
     for row in data:
@@ -440,11 +437,7 @@ def cmd_import_csv(args: argparse.Namespace) -> int:
                 role = (row.get("role") or "user").strip() or "user"
                 odoo_username = (row.get("odoo_username") or "").strip()
                 odoo_api_key = (row.get("odoo_api_key") or "").strip()
-                skills = [
-                    value.strip()
-                    for value in (row.get("skills") or "").split(";")
-                    if value.strip()
-                ]
+                skills = [value.strip() for value in (row.get("skills") or "").split(";") if value.strip()]
 
                 if bool(odoo_username) != bool(odoo_api_key):
                     raise ValueError(

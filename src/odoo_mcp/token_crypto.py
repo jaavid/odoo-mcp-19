@@ -40,8 +40,7 @@ def _read_encryption_password() -> str:
             return value
 
     raise RuntimeError(
-        "TOKEN_ENCRYPTION_KEY (or TOKEN_ENCRYPTION_KEY_FILE) is required to "
-        "encrypt/decrypt registry credentials."
+        "TOKEN_ENCRYPTION_KEY (or TOKEN_ENCRYPTION_KEY_FILE) is required to " "encrypt/decrypt registry credentials."
     )
 
 
