@@ -14,7 +14,7 @@ import threading
 import time
 from dataclasses import dataclass
 
-from .auth_verifier import ENV_ADMIN_CLIENT_ID
+from .auth_verifier import ENV_ADMIN_CLIENT_ID, get_verified_access_token
 from .odoo_client import OdooClient
 from .token_crypto import decrypt_secret
 from .users_db import get_users_db
@@ -33,13 +33,25 @@ class _Entry:
 
 
 def _safe_get_access_token():
-    """Current FastMCP access token, or None (stdio / no auth context)."""
+    """Current FastMCP access token, with a verified-context fallback.
+
+    FastMCP normally exposes the token through ``get_access_token()``. In some
+    sync tool/resource bridges in FastMCP 3.x that dependency context can be
+    unavailable inside the worker thread. The token verifier stores the same
+    already-verified ``AccessToken`` in a regular ContextVar, which AnyIO
+    propagates into worker threads, so use it only when FastMCP returns no
+    token. No bearer string is reparsed or trusted here.
+    """
     try:
         from fastmcp.server.dependencies import get_access_token
 
-        return get_access_token()
+        token = get_access_token()
     except Exception:
-        return None
+        token = None
+
+    if token is not None:
+        return token
+    return get_verified_access_token()
 
 
 def current_role() -> str | None:
