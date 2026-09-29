@@ -1,8 +1,9 @@
 """
 FastMCP application setup for the Odoo MCP Server.
 
-Creates the FastMCP instance with auth, lifespan, and icon loading.
-Other modules import `mcp` from here to register resources, tools, and prompts.
+Creates the FastMCP instance with auth, lifespan, icon loading, and the
+OpenAI-compatible authenticated profile tool. Other modules import `mcp` from
+here to register resources, tools, and prompts.
 """
 
 import base64
@@ -77,23 +78,32 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
 # ----- Authentication -----
 
 
-def _get_auth_provider():
-    """Get the auth provider.
+def _csv_env(name: str, default: str = "") -> list[str]:
+    return [item.strip() for item in os.environ.get(name, default).split(",") if item.strip()]
 
-    USERS_DB_PATH set -> per-user keys from the shared registry, with the
-    static MCP_API_KEY (if any) kept as fallback. Otherwise today's
-    single-static-key behavior, or no auth (stdio).
-    """
-    api_key = os.environ.get("MCP_API_KEY")
 
-    from .users_db import get_users_db
+def _public_url() -> str:
+    """Resolve the public MCP origin, including Alpic's automatic host variable."""
+    value = (os.environ.get("MCP_PUBLIC_URL") or os.environ.get("ALPIC_HOST") or "").strip()
+    if not value:
+        return ""
+    if "://" not in value:
+        value = f"https://{value}"
+    return value.rstrip("/")
 
-    users_db = get_users_db()
+
+def _resource_url(public_url: str) -> str:
+    """Match the URL FastMCP advertises as the protected MCP resource."""
+    mcp_path = os.environ.get("FASTMCP_STREAMABLE_HTTP_PATH", "/mcp").strip() or "/mcp"
+    return f"{public_url.rstrip('/')}/{mcp_path.lstrip('/')}"
+
+
+def _build_legacy_verifier(users_db, api_key: str | None):
+    """Preserve existing personal/static bearer clients during OAuth migration."""
     if users_db is not None:
         from .auth_verifier import DbTokenVerifier
 
         return DbTokenVerifier(users_db, static_api_key=api_key)
-
     if api_key:
         from fastmcp.server.auth import StaticTokenVerifier
 
@@ -102,10 +112,134 @@ def _get_auth_provider():
                 api_key: {
                     "client_id": "mcp-client",
                     "scopes": ["read", "write"],
+                    "role": "admin",
+                    "auth": "static",
                 }
             }
         )
     return None
+
+
+def _get_oidc_auth_provider(users_db, legacy_verifier=None):
+    """Build Keycloak OAuth/OIDC auth for ChatGPT-compatible MCP clients.
+
+    Two identity modes are supported:
+
+    ``registry`` maps the verified OIDC email to ``users.db`` and therefore to
+    personal Odoo credentials. ``shared`` authorizes the verified Keycloak user
+    with a realm role/email policy and then uses the environment-configured Odoo
+    service account. The latter is suitable for hosted environments such as
+    Alpic where ``users.db`` is not mounted.
+    """
+    from fastmcp.server.auth import MultiAuth
+    from fastmcp.server.auth.providers.keycloak import KeycloakAuthProvider
+
+    from .auth_verifier import RegistryMappedJWTVerifier, SharedOIDCJWTVerifier
+
+    issuer = os.environ.get("MCP_OIDC_ISSUER", "").rstrip("/")
+    public_url = _public_url()
+    if not issuer:
+        raise RuntimeError("MCP_AUTH_MODE=oidc requires MCP_OIDC_ISSUER")
+    if not public_url:
+        raise RuntimeError("MCP_AUTH_MODE=oidc requires MCP_PUBLIC_URL or ALPIC_HOST")
+
+    audience = os.environ.get("MCP_OIDC_AUDIENCE") or _resource_url(public_url)
+    jwks_uri = os.environ.get(
+        "MCP_OIDC_JWKS_URI",
+        f"{issuer}/protocol/openid-connect/certs",
+    )
+    email_claim = os.environ.get("MCP_OIDC_EMAIL_CLAIM", "email")
+    required_scopes = _csv_env(
+        "MCP_OIDC_SCOPES",
+        "openid,profile,email,mcp:tools,mcp:resources,mcp:prompts",
+    )
+    identity_mode = os.environ.get("MCP_OIDC_IDENTITY_MODE", "").strip().lower()
+    if not identity_mode:
+        identity_mode = "registry" if users_db is not None else "shared"
+
+    verifier_kwargs = {
+        "jwks_uri": jwks_uri,
+        "issuer": issuer,
+        "audience": audience,
+        "algorithm": os.environ.get("MCP_OIDC_ALGORITHM", "RS256"),
+        "required_scopes": required_scopes,
+    }
+
+    if identity_mode == "registry":
+        if users_db is None:
+            raise RuntimeError("MCP_OIDC_IDENTITY_MODE=registry requires USERS_DB_PATH")
+        verifier = RegistryMappedJWTVerifier(
+            users_db=users_db,
+            email_claim=email_claim,
+            **verifier_kwargs,
+        )
+    elif identity_mode == "shared":
+        allowed_emails = frozenset(_csv_env("MCP_OIDC_ALLOWED_EMAILS"))
+        verifier = SharedOIDCJWTVerifier(
+            email_claim=email_claim,
+            shared_role=os.environ.get("MCP_OIDC_SHARED_ROLE", "readonly").strip().lower(),
+            required_realm_role=os.environ.get("MCP_OIDC_REQUIRED_REALM_ROLE", "kasbifydev") or None,
+            allowed_emails=allowed_emails,
+            **verifier_kwargs,
+        )
+    else:
+        raise RuntimeError("Unsupported MCP_OIDC_IDENTITY_MODE=" f"{identity_mode!r}; expected registry or shared")
+
+    keycloak = KeycloakAuthProvider(
+        realm_url=issuer,
+        base_url=public_url,
+        required_scopes=required_scopes,
+        audience=audience,
+        token_verifier=verifier,
+    )
+
+    if legacy_verifier is not None:
+        return MultiAuth(server=keycloak, verifiers=[legacy_verifier])
+    return keycloak
+
+
+def _get_auth_provider():
+    """Get the configured authentication provider.
+
+    Modes:
+    - ``oidc``: Keycloak OAuth/OIDC, plus optional legacy registry/static tokens.
+    - ``registry``: existing users.db API keys, optionally with MCP_API_KEY fallback.
+    - ``static``: MCP_API_KEY only.
+    - ``none``: no HTTP auth (primarily stdio/local development).
+    - ``auto`` (default): OIDC when MCP_OIDC_ISSUER is set, otherwise preserve
+      the existing registry/static behavior.
+    """
+    api_key = os.environ.get("MCP_API_KEY")
+
+    from .users_db import get_users_db
+
+    users_db = get_users_db()
+    mode = os.environ.get("MCP_AUTH_MODE", "auto").strip().lower()
+    if mode == "auto":
+        if os.environ.get("MCP_OIDC_ISSUER"):
+            mode = "oidc"
+        elif users_db is not None:
+            mode = "registry"
+        else:
+            mode = "static"
+
+    legacy_verifier = _build_legacy_verifier(users_db, api_key)
+
+    if mode == "oidc":
+        return _get_oidc_auth_provider(users_db, legacy_verifier=legacy_verifier)
+
+    if mode == "registry":
+        if users_db is None:
+            raise RuntimeError("MCP_AUTH_MODE=registry requires USERS_DB_PATH")
+        return legacy_verifier
+
+    if mode == "static":
+        return _build_legacy_verifier(None, api_key)
+
+    if mode == "none":
+        return None
+
+    raise RuntimeError(f"Unsupported MCP_AUTH_MODE={mode!r}; expected auto, oidc, registry, static, or none")
 
 
 # ----- Create MCP Server -----
@@ -122,6 +256,70 @@ mcp = FastMCP(
     website_url=_website_url,
     icons=_icons,
 )
+
+
+# ----- Authenticated profile tool -----
+
+_PROFILE_OUTPUT_SCHEMA = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": r"\S",
+            "description": "Opaque stable profile identifier for the authenticated connection.",
+        },
+        "name": {"type": "string"},
+        "email": {"type": "string"},
+        "nickname": {"type": "string"},
+    },
+    "required": ["id"],
+    "additionalProperties": False,
+}
+
+
+@mcp.tool(
+    name="get_profile",
+    title="Get KasbifyDev Profile",
+    description=(
+        "Return the profile represented by this request's authenticated credentials. "
+        "The opaque id remains stable across token refresh and reconnection."
+    ),
+    output_schema=_PROFILE_OUTPUT_SCHEMA,
+    annotations={
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+    meta={
+        "openai/profile": True,
+        "securitySchemes": [{"type": "oauth2", "scopes": []}],
+    },
+    icons=_icons,
+)
+def get_authenticated_profile() -> dict[str, str]:
+    """Return a stable profile derived only from validated credentials."""
+    from fastmcp.server.dependencies import get_access_token
+
+    token = get_access_token()
+    if token is None:
+        raise PermissionError("Authentication is required to read the current profile.")
+
+    claims = token.claims or {}
+    profile_id = claims.get("oidc_subject") or token.client_id
+    if not isinstance(profile_id, str) or not profile_id.strip():
+        raise PermissionError("Authenticated credentials do not contain a stable profile identifier.")
+
+    profile = {"id": profile_id.strip()}
+    name = claims.get("name")
+    email = claims.get("email")
+    if isinstance(name, str) and name.strip():
+        profile["name"] = name.strip()
+    if isinstance(email, str) and email.strip():
+        profile["email"] = email.strip()
+    return profile
 
 
 # ----- Per-user skill visibility (multi-user mode only) -----
