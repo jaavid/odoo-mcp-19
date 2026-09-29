@@ -24,9 +24,7 @@ ENV_ADMIN_CLIENT_ID = "env-admin"
 # context even though ordinary ContextVars still propagate into the worker
 # thread. Keep the already-verified identity in our own request context as a
 # fallback so per-user Odoo resolution never silently drops to env credentials.
-_verified_access_token: ContextVar[AccessToken | None] = ContextVar(
-    "odoo_mcp_verified_access_token", default=None
-)
+_verified_access_token: ContextVar[AccessToken | None] = ContextVar("odoo_mcp_verified_access_token", default=None)
 
 
 def get_verified_access_token() -> AccessToken | None:
@@ -38,11 +36,21 @@ class DbTokenVerifier(TokenVerifier):
     """Verify bearer tokens against the shared per-user registry."""
 
     def __init__(self, users_db: UsersDb, static_api_key: str | None = None) -> None:
+        """Initialize the verifier with the registry and optional static admin key."""
         super().__init__()
         self._db = users_db
         self._static = static_api_key
 
     async def verify_token(self, token: str) -> AccessToken | None:
+        """Verify a bearer token and publish only the successfully verified identity.
+
+        The request-local fallback is cleared before any comparison or registry
+        lookup. Therefore an exception, cancellation, or invalid credential can
+        never leave a previously verified identity available to downstream sync
+        bridges that cannot see FastMCP's native dependency context.
+        """
+        _verified_access_token.set(None)
+
         if self._static and hmac.compare_digest(token, self._static):
             access_token = AccessToken(
                 token=token,
@@ -57,9 +65,6 @@ class DbTokenVerifier(TokenVerifier):
         # SQLite lookup off the event loop
         identity = await asyncio.to_thread(self._db.lookup_api_key, key_hash)
         if identity is None:
-            # Clear any previous value in case a request execution context is
-            # reused by the host. An invalid token must never inherit identity.
-            _verified_access_token.set(None)
             return None
 
         scopes = ["read"] if identity.role == "readonly" else ["read", "write"]
